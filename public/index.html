@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflow Architect</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="prompt-pane" aria-label="Workflow prompt">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">WA</div>
+          <div>
+            <h1>Workflow Architect</h1>
+            <p id="providerStatus">Checking model provider...</p>
+          </div>
+        </div>
+
+        <label for="prompt">Business workflow prompt</label>
+        <textarea id="prompt" spellcheck="true">A regional HVAC company receives maintenance requests by web form and email. Dispatchers triage urgency, check technician availability, send quotes for approvals, schedule jobs, notify customers, update inventory, and invoice after completion.</textarea>
+
+        <div class="button-row">
+          <button id="generateBtn" class="primary-btn" type="button">
+            <span aria-hidden="true">↳</span>
+            Generate
+          </button>
+          <button id="sampleBtn" type="button">Sample</button>
+        </div>
+
+        <section class="settings-panel" aria-label="Model connection">
+          <div>
+            <h2>Model connection</h2>
+            <p id="modelDetails">Local parser enabled.</p>
+          </div>
+          <div class="connection-list">
+            <div class="connection-item active">
+              <span class="status-dot"></span>
+              <div>
+                <strong>Prototype engine</strong>
+                <small>Works without network or API credits.</small>
+              </div>
+            </div>
+            <div class="connection-item">
+              <span class="status-dot muted"></span>
+              <div>
+                <strong>OpenAI API</strong>
+                <small>Set OPENAI_API_KEY on Railway for model-backed diagrams.</small>
+              </div>
+            </div>
+            <div class="connection-item disabled">
+              <span class="status-dot muted"></span>
+              <div>
+                <strong>ChatGPT/Codex login</strong>
+                <small>Unsupported for third-party model calls without API billing.</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="notes-panel">
+          <h2>Assumptions</h2>
+          <ul id="assumptions"></ul>
+        </section>
+      </aside>
+
+      <section class="canvas-pane" aria-label="Generated system architecture diagram">
+        <header class="canvas-toolbar">
+          <div>
+            <p class="eyebrow">Generated architecture</p>
+            <h2 id="diagramTitle">Ready</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="fitBtn" type="button" title="Fit diagram">⛶</button>
+            <button id="exportSvgBtn" type="button" title="Export SVG">SVG</button>
+            <button id="exportPngBtn" type="button" title="Export PNG">PNG</button>
+          </div>
+        </header>
+        <div class="canvas-stage" id="stage">
+          <svg id="diagram" role="img" aria-labelledby="diagramTitle" viewBox="0 0 1320 520"></svg>
+        </div>
+        <footer class="inspector">
+          <div>
+            <h3>Summary</h3>
+            <p id="summary">Type a workflow and generate a diagram.</p>
+          </div>
+          <div>
+            <h3>Risks</h3>
+            <ul id="risks"></ul>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
