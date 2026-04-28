@@ -8,7 +8,7 @@
   </head>
   <body>
     <main class="app-shell">
-      <aside class="prompt-pane" aria-label="Workflow prompt">
+      <aside class="prompt-pane" aria-label="Workflow controls">
         <div class="brand-row">
           <div class="brand-mark" aria-hidden="true">WA</div>
           <div>
@@ -17,57 +17,113 @@
           </div>
         </div>
 
-        <label for="prompt">Business workflow prompt</label>
-        <textarea id="prompt" spellcheck="true">A regional HVAC company receives maintenance requests by web form and email. Dispatchers triage urgency, check technician availability, send quotes for approvals, schedule jobs, notify customers, update inventory, and invoice after completion.</textarea>
+        <nav class="nav-tabs" aria-label="Primary">
+          <button id="diagramTab" class="active" type="button">Diagram</button>
+          <button id="settingsTab" type="button">Settings</button>
+          <button id="loginTab" type="button">Login</button>
+        </nav>
 
-        <div class="button-row">
-          <button id="generateBtn" class="primary-btn" type="button">
-            <span aria-hidden="true">↳</span>
-            Generate
-          </button>
-          <button id="sampleBtn" type="button">Sample</button>
-        </div>
+        <section id="diagramPanel" class="side-panel active">
+          <label for="prompt">Business workflow prompt</label>
+          <textarea id="prompt" spellcheck="true">A regional HVAC company receives maintenance requests by web form and email. Dispatchers triage urgency, check technician availability, send quotes for approvals, schedule jobs, notify customers, update inventory, and invoice after completion.</textarea>
 
-        <section class="settings-panel" aria-label="Model connection">
-          <div>
-            <h2>Model connection</h2>
-            <p id="modelDetails">Local parser enabled.</p>
+          <div class="button-row">
+            <button id="generateBtn" class="primary-btn" type="button">
+              <span aria-hidden="true">↳</span>
+              Generate
+            </button>
+            <button id="sampleBtn" type="button">Sample</button>
           </div>
-          <div class="connection-list">
-            <div class="connection-item active">
-              <span class="status-dot"></span>
-              <div>
-                <strong>Prototype engine</strong>
-                <small>Works without network or API credits.</small>
+
+          <section class="settings-panel" aria-label="Model connection">
+            <div>
+              <h2>Model connection</h2>
+              <p id="modelDetails">Local parser enabled.</p>
+            </div>
+            <div class="connection-list">
+              <div class="connection-item active">
+                <span class="status-dot"></span>
+                <div>
+                  <strong>Prototype engine</strong>
+                  <small>Always available for quick diagrams.</small>
+                </div>
+              </div>
+              <div class="connection-item">
+                <span id="openaiDot" class="status-dot muted"></span>
+                <div>
+                  <strong>OpenAI API</strong>
+                  <small id="openaiStatus">Set your key from Settings after login.</small>
+                </div>
+              </div>
+              <div class="connection-item disabled">
+                <span class="status-dot muted"></span>
+                <div>
+                  <strong>ChatGPT/Codex login</strong>
+                  <small>Not supported for third-party model calls without API billing.</small>
+                </div>
               </div>
             </div>
-            <div class="connection-item">
-              <span class="status-dot muted"></span>
-              <div>
-                <strong>OpenAI API</strong>
-                <small>Set OPENAI_API_KEY on Railway for model-backed diagrams.</small>
-              </div>
+          </section>
+
+          <section class="notes-panel">
+            <h2>Assumptions</h2>
+            <ul id="assumptions"></ul>
+          </section>
+        </section>
+
+        <section id="settingsPanel" class="side-panel">
+          <div class="panel-heading">
+            <h2>Account settings</h2>
+            <p id="settingsIdentity">Login to save model settings.</p>
+          </div>
+
+          <form id="settingsForm" class="form-stack">
+            <label for="openaiApiKey">OpenAI API key</label>
+            <input id="openaiApiKey" name="openaiApiKey" type="password" autocomplete="off" placeholder="sk-..." />
+            <small id="keyState">No user key saved.</small>
+
+            <label for="openaiModel">OpenAI model</label>
+            <input id="openaiModel" name="openaiModel" type="text" value="gpt-5-mini" />
+
+            <div class="button-row">
+              <button id="saveSettingsBtn" class="primary-btn" type="submit">Save settings</button>
+              <button id="clearKeyBtn" type="button">Clear key</button>
             </div>
-            <div class="connection-item disabled">
-              <span class="status-dot muted"></span>
-              <div>
-                <strong>ChatGPT/Codex login</strong>
-                <small>Unsupported for third-party model calls without API billing.</small>
-              </div>
-            </div>
+          </form>
+
+          <div class="settings-panel">
+            <h2>Login email</h2>
+            <p id="loopsStatus">Loops status pending.</p>
+            <button id="logoutBtn" type="button">Logout</button>
           </div>
         </section>
 
-        <section class="notes-panel">
-          <h2>Assumptions</h2>
-          <ul id="assumptions"></ul>
+        <section id="loginPanel" class="side-panel">
+          <div class="panel-heading">
+            <h2>Passwordless login</h2>
+            <p>Enter your email, then use the one-time code sent by Loops.</p>
+          </div>
+
+          <form id="requestCodeForm" class="form-stack">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            <button class="primary-btn" type="submit">Send code</button>
+          </form>
+
+          <form id="verifyCodeForm" class="form-stack">
+            <label for="code">One-time code</label>
+            <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+            <button class="primary-btn" type="submit">Verify</button>
+          </form>
+
+          <p id="authMessage" class="auth-message"></p>
         </section>
       </aside>
 
-      <section class="canvas-pane" aria-label="Generated system architecture diagram">
+      <section class="canvas-pane" aria-label="Generated workflow flowchart">
         <header class="canvas-toolbar">
           <div>
-            <p class="eyebrow">Generated architecture</p>
+            <p class="eyebrow">Generated flowchart</p>
             <h2 id="diagramTitle">Ready</h2>
           </div>
           <div class="toolbar-actions">
@@ -77,7 +133,7 @@
           </div>
         </header>
         <div class="canvas-stage" id="stage">
-          <svg id="diagram" role="img" aria-labelledby="diagramTitle" viewBox="0 0 1320 520"></svg>
+          <svg id="diagram" role="img" aria-labelledby="diagramTitle" viewBox="0 0 2050 680"></svg>
         </div>
         <footer class="inspector">
           <div>
