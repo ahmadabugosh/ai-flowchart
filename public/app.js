@@ -254,7 +254,7 @@ function drawLanes(lanes) {
     svg.appendChild(element("rect", {
       x: "24",
       y,
-      width: "2460",
+      width: "2800",
       height: "132",
       fill: index % 2 === 0 ? "#fbfcfd" : "#f4f7fa",
       stroke: "#d8dee6",
@@ -616,7 +616,7 @@ async function exportPng() {
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement("canvas");
-    canvas.width = 2520;
+    canvas.width = 2860;
     canvas.height = 720;
     const context = canvas.getContext("2d");
     context.fillStyle = "#ffffff";

@@ -489,8 +489,8 @@ function generateLocally(prompt) {
     node("n9", core, "process", "process", "Create the operational record and assign ownership.", "Workflow platform", 1600, 404),
     node("n10", record, "data", "database", "Persist state, audit events, and reference data.", "Workflow platform", 1900, 404),
     node("n11", external, "external", "external", "Sync updates with the required third-party system.", "External", 1900, 574),
-    node("n12", "Notify requester", "process", "document", "Send status, schedule, quote, or completion update.", "Workflow platform", 2100, 404),
-    node("n13", "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", 2360, 78)
+    node("n12", "Notify requester", "process", "document", "Send status, schedule, quote, or completion update.", "Workflow platform", 2260, 404),
+    node("n13", "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", 2660, 78)
   ];
 
   const edges = [
