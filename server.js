@@ -62,7 +62,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         sent,
-        devCode: sent ? undefined : code,
+        devCode: sent || isProductionLike() ? undefined : code,
         message: sent
           ? "Login code sent."
           : "Loops is not configured, so the code is shown for development."
@@ -291,6 +291,9 @@ function decrypt(value) {
 
 async function sendLoginCode(email, code) {
   if (!process.env.LOOPS_API_KEY || !process.env.LOOPS_TRANSACTIONAL_ID) {
+    if (isProductionLike()) {
+      throw new Error("Loops is not configured for passwordless login.");
+    }
     console.log(`Login code for ${email}: ${code}`);
     return false;
   }
@@ -314,6 +317,10 @@ async function sendLoginCode(email, code) {
     throw new Error(`Loops email failed: ${response.status} ${detail}`);
   }
   return true;
+}
+
+function isProductionLike() {
+  return process.env.NODE_ENV === "production" || Boolean(process.env.RAILWAY_PROJECT_ID);
 }
 
 async function generateWithOpenAI(prompt, apiKey, model, provider) {
