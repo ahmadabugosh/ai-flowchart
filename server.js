@@ -465,21 +465,32 @@ function generateLocally(prompt) {
   const isSupport = hasAny(lower, ["ticket", "support", "customer service", "helpdesk"]);
   const isInventory = hasAny(lower, ["inventory", "warehouse", "fulfillment", "order", "shipment"]);
   const isFinance = hasAny(lower, ["invoice", "payment", "billing", "refund"]);
-  const channel = hasAny(lower, ["email"]) ? "Email intake" : hasAny(lower, ["form", "portal", "website"]) ? "Portal intake" : "Request intake";
-  const core = isSupport ? "Create case" : isInventory ? "Create order" : isSales ? "Create opportunity" : isFinance ? "Create billing case" : "Create workflow case";
-  const record = isFinance ? "Billing ledger" : isInventory ? "Inventory database" : isSales ? "CRM records" : "Operations database";
-  const external = isFinance ? "Payment provider" : isInventory ? "Carrier / ERP" : isSales ? "CRM / quoting tool" : "External system";
-  const actionCount = estimateActionCount(lower);
-  const needsReview = actionCount >= 3 || hasAny(lower, ["review", "check", "validate", "qualify", "triage"]);
-  const needsCompletenessDecision = actionCount >= 5 || hasAny(lower, ["details", "complete", "missing", "validate"]);
-  const needsAI = hasAny(lower, ["classify", "priority", "urgent", "triage", "ai"]);
-  const needsApproval = hasAny(lower, ["approve", "approval", "quote", "exception", "manager", "refund", "budget", "signoff"]);
-  const needsDataStore = actionCount >= 3 || hasAny(lower, ["record", "database", "ledger", "crm", "erp", "track", "store", "update"]);
-  const needsExternal = hasAny(lower, ["erp", "crm", "payment", "carrier", "ship", "shipment", "vendor", "supplier", "quickbooks", "external", "sync"]);
-  const needsNotify = hasAny(lower, ["notify", "email", "text", "update", "message"]) || actionCount >= 2;
-  const hasOpsLane = needsReview || needsCompletenessDecision || needsApproval;
-  const hasExternalLane = needsExternal;
+  const context = {
+    isSales,
+    isSupport,
+    isInventory,
+    isFinance,
+    channel: hasAny(lower, ["email"]) ? "Email intake" : hasAny(lower, ["form", "portal", "website"]) ? "Portal intake" : "Request intake",
+    fallbackCore: isSupport ? "Create case" : isInventory ? "Create order" : isSales ? "Create opportunity" : isFinance ? "Create billing case" : "Create workflow case",
+    entity: detectPrimaryEntity(lower),
+    hasExternalWords: hasAny(lower, ["erp", "crm", "payment", "carrier", "ship", "shipment", "vendor", "supplier", "quickbooks", "external", "sync"])
+  };
+  const clauses = extractActionClauses(prompt);
+  const specs = clauses.map((clause, index) => buildLocalStepSpec(clause, index, context)).filter(Boolean);
+  if (!specs.length) {
+    specs.push({
+      label: context.fallbackCore,
+      type: "process",
+      shape: "process",
+      owner: "Workflow platform",
+      lane: "system",
+      description: "Create the main operational record and assign ownership.",
+      edgeLabel: "continue"
+    });
+  }
 
+  const hasOpsLane = specs.some((spec) => spec.lane === "ops");
+  const hasExternalLane = specs.some((spec) => spec.lane === "external");
   const lanes = buildLanes(hasOpsLane, hasExternalLane);
   const laneY = Object.fromEntries(lanes.map((lane) => [lane.id, lane.y]));
   const nodes = [];
@@ -487,104 +498,36 @@ function generateLocally(prompt) {
   let nodeIndex = 1;
   let x = 88;
   const gap = 280;
-  let previousMainApproval = null;
 
   const start = addStep(nodes, nodeIndex++, "Start", "terminator", "terminator", "Workflow begins when a request arrives.", "Customer", x, laneY.customer);
-  x += gap;
-  const intake = addStep(nodes, nodeIndex++, channel, "intake", "document", "Capture request details and source context.", "Customer", x, laneY.customer);
-  let previousMain = intake;
-
-  if (needsReview) {
+  let previousMain = start;
+  specs.forEach((spec, index) => {
     x += gap;
-    const review = addStep(nodes, nodeIndex++, "Review request", "process", "process", "Check scope, completeness, and routing needs.", "Operations", x, laneY.ops || laneY.system);
-    edges.push(edge(start.id, intake.id, "request"));
-    edges.push(edge(intake.id, review.id, "submitted"));
-    previousMain = review;
-  } else {
-    edges.push(edge(start.id, intake.id, "request"));
-  }
-
-  if (needsCompletenessDecision) {
-    x += gap;
-    const complete = addStep(nodes, nodeIndex++, "Complete?", "decision", "decision", "Decide whether the request has enough detail.", "Operations", x, laneY.ops || laneY.system);
-    const askDetails = addStep(nodes, nodeIndex++, "Ask for details", "process", "document", "Request missing information and reopen intake.", "Operations", x, laneY.customer);
-    edges.push(edge(previousMain.id, complete.id, needsReview ? "triage" : "review"));
-    edges.push(edge(complete.id, askDetails.id, "No"));
-    edges.push(edge(askDetails.id, intake.id, "resubmit"));
-    previousMain = complete;
-  }
-
-  if (needsAI) {
-    x += gap;
-    const classify = addStep(nodes, nodeIndex++, "Classify priority", "automation", "process", "Suggest urgency, type, and routing owner.", "Workflow platform", x, laneY.system);
-    edges.push(edge(previousMain.id, classify.id, previousMain.shape === "decision" ? "Yes" : "route"));
-    previousMain = classify;
-  }
-
-  if (needsApproval) {
-    x += gap;
-    const approvalNeeded = addStep(nodes, nodeIndex++, "Approval needed?", "decision", "decision", "Branch if policy or manager approval is required.", "Workflow platform", x, laneY.system);
-    const managerApproval = addStep(nodes, nodeIndex++, "Manager approval", "process", "process", "Approve, reject, or request changes.", "Operations", x, laneY.ops || laneY.system);
-    edges.push(edge(previousMain.id, approvalNeeded.id, previousMain.shape === "decision" ? "Yes" : "route"));
-    previousMain = approvalNeeded;
-    previousMainApproval = managerApproval;
-  }
-
-  x += gap;
-  const coreNode = addStep(nodes, nodeIndex++, core, "process", "process", "Create the main operational record and assign ownership.", "Workflow platform", x, laneY.system);
-
-  if (previousMain.shape === "decision" && previousMainApproval) {
-    edges.push(edge(previousMain.id, previousMainApproval.id, "Yes"));
-    edges.push(edge(previousMainApproval.id, coreNode.id, "approved"));
-    edges.push(edge(previousMain.id, coreNode.id, "No"));
-  } else {
-    edges.push(edge(previousMain.id, coreNode.id, previousMain.shape === "decision" ? "Yes" : "continue"));
-  }
-
-  previousMain = coreNode;
-
-  let recordNode = null;
-  if (needsDataStore) {
-    x += gap;
-    recordNode = addStep(nodes, nodeIndex++, record, "data", "database", "Persist workflow state, audit events, and reference data.", "Workflow platform", x, laneY.system);
-    edges.push(edge(previousMain.id, recordNode.id, "write state"));
-    previousMain = recordNode;
-  }
-
-  let externalNode = null;
-  if (needsExternal) {
-    const externalSource = recordNode || coreNode;
-    externalNode = addStep(nodes, nodeIndex++, external, "external", "external", "Sync or enrich with a third-party system.", "External", externalSource.x, laneY.external);
-    edges.push(edge(externalSource.id, externalNode.id, "sync"));
-  }
-
-  let notifyNode = null;
-  if (needsNotify) {
-    x += gap;
-    notifyNode = addStep(nodes, nodeIndex++, "Notify requester", "process", "document", "Send status, approval, schedule, or completion update.", "Workflow platform", x, laneY.system);
-    edges.push(edge((recordNode || coreNode).id, notifyNode.id, "status"));
-    if (externalNode) edges.push(edge(externalNode.id, notifyNode.id, "confirmation"));
-    previousMain = notifyNode;
-  }
+    const ownerLabel = ownerLabelForLane(spec.lane);
+    const step = addStep(
+      nodes,
+      nodeIndex++,
+      spec.label,
+      spec.type,
+      spec.shape,
+      spec.description,
+      ownerLabel,
+      x,
+      laneY[spec.lane] || laneY.system
+    );
+    edges.push(edge(previousMain.id, step.id, index === 0 ? "request" : spec.edgeLabel));
+    previousMain = step;
+  });
 
   x += gap;
   const doneNode = addStep(nodes, nodeIndex++, "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", x, laneY.customer);
-  edges.push(edge((notifyNode || recordNode || coreNode).id, doneNode.id, "closed"));
+  edges.push(edge(previousMain.id, doneNode.id, "closed"));
 
   return {
     provider: "local",
     model: "local-workflow-parser",
     title: titleFromPrompt(prompt, isSales, isSupport, isInventory, isFinance),
-    summary:
-      localSummary({
-        needsReview,
-        needsCompletenessDecision,
-        needsAI,
-        needsApproval,
-        needsDataStore,
-        needsExternal,
-        needsNotify
-      }),
+    summary: localSummaryFromSpecs(specs),
     lanes,
     nodes,
     edges,
@@ -602,12 +545,157 @@ function generateLocally(prompt) {
 }
 
 function hasAny(text, terms) {
-  return terms.some((term) => text.includes(term));
+  return terms.some((term) => new RegExp(`\\b${escapeRegExp(term)}\\b`, "i").test(text));
 }
 
 function estimateActionCount(text) {
   const matches = text.match(/\b(receive|submit|check|review|validate|qualify|approve|route|create|sync|update|track|notify|email|text|schedule|ship|invoice|refund|classify|escalate)\b/g);
   return Math.max(1, matches?.length || 0);
+}
+
+function extractActionClauses(prompt) {
+  const segments = prompt
+    .replace(/[.]/g, ",")
+    .replace(/\bthen\b/gi, ",")
+    .split(/[,;]+/)
+    .flatMap((segment) => segment.split(/\band\b(?=\s+(?:receives?|submits?|checks?|reviews?|validates?|qualifies?|approves?|routes?|creates?|syncs?|updates?|tracks?|notifies?|emails?|texts?|schedules?|ships?|invoices?|refunds?|classifies?|escalates?|reserves?|coordinates?|processes?|sends?)\b)/i))
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  return segments.slice(0, 8);
+}
+
+function buildLocalStepSpec(clause, index, context) {
+  const lower = clause.toLowerCase();
+  const lane = detectLane(lower, index, context);
+  const description = sentenceCase(clause, 68);
+  const label = labelFromClause(lower, index, context);
+
+  if (hasAny(lower, ["classify", "priority", "score", "assign automatically", "ai"])) {
+    return { label, type: "automation", shape: "process", lane: "system", description, edgeLabel: "classified" };
+  }
+  if (hasAny(lower, ["notify", "email", "text", "message", "send shipment notices", "send customer updates"])) {
+    return { label, type: "process", shape: "document", lane, description, edgeLabel: "notified" };
+  }
+  if (hasAny(lower, ["sync", "ship", "shipment", "carrier", "payment provider", "supplier", "vendor"])) {
+    return { label, type: "external", shape: "external", lane: "external", description, edgeLabel: "synced" };
+  }
+  if (label.endsWith("?")) {
+    return { label, type: "decision", shape: "decision", lane, description, edgeLabel: "checked" };
+  }
+  if (hasAny(lower, ["ledger", "database", "track", "store", "record", "inventory", "crm", "erp"]) && !hasAny(lower, ["review", "check", "validate"])) {
+    return { label, type: "data", shape: "database", lane: "system", description, edgeLabel: "updated" };
+  }
+  if (index === 0 && hasAny(lower, ["receive", "receives", "submit", "submits", "request", "ticket", "lead", "order", "invoice"])) {
+    return { label, type: "intake", shape: "document", lane: "customer", description, edgeLabel: "submitted" };
+  }
+  return { label, type: "process", shape: "process", lane, description, edgeLabel: edgeLabelFromClause(lower) };
+}
+
+function detectLane(lower, index, context) {
+  if (hasAny(lower, ["notify", "email", "text", "message"])) return "system";
+  if (hasAny(lower, ["sync", "ship", "shipment", "carrier", "payment provider", "supplier", "vendor"])) return "external";
+  if (hasAny(lower, ["approve", "approval", "review", "check", "validate", "qualify", "budget", "manager", "legal", "finance"])) return "ops";
+  if (index === 0 && hasAny(lower, ["receive", "submit", "request", "ticket", "lead", "order"])) return "customer";
+  return "system";
+}
+
+function labelFromClause(lower, index, context) {
+  if (index === 0 && hasAny(lower, ["receive", "receives", "submit", "submits", "request", "ticket", "lead", "order", "invoice"])) {
+    return context.channel;
+  }
+  if (hasAny(lower, ["eligible"])) return "Eligible?";
+  if (hasAny(lower, ["complete", "missing"])) return "Complete?";
+  if (hasAny(lower, ["valid", "validate", "validation"])) return "Valid?";
+  if (hasAny(lower, ["available", "inventory"])) return "In stock?";
+  return imperativeLabel(lower, context);
+}
+
+function imperativeLabel(lower, context) {
+  const verbs = [
+    ["receives", "Receive"], ["receive", "Receive"], ["submits", "Submit"], ["submit", "Submit"],
+    ["checks", "Check"], ["check", "Check"], ["reviews", "Review"], ["review", "Review"],
+    ["validates", "Validate"], ["validate", "Validate"], ["qualifies", "Qualify"], ["qualify", "Qualify"],
+    ["approves", "Approve"], ["approve", "Approve"], ["routes", "Route"], ["route", "Route"],
+    ["creates", "Create"], ["create", "Create"], ["syncs", "Sync"], ["sync", "Sync"],
+    ["updates", "Update"], ["update", "Update"], ["tracks", "Track"], ["track", "Track"],
+    ["notifies", "Notify"], ["notify", "Notify"], ["emails", "Email"], ["email", "Email"],
+    ["texts", "Text"], ["text", "Text"], ["schedules", "Schedule"], ["schedule", "Schedule"],
+    ["ships", "Ship"], ["ship", "Ship"], ["invoices", "Invoice"], ["invoice", "Invoice"],
+    ["refunds", "Refund"], ["refund", "Refund"], ["classifies", "Classify"], ["classify", "Classify"],
+    ["escalates", "Escalate"], ["escalate", "Escalate"], ["reserves", "Reserve"], ["reserve", "Reserve"],
+    ["coordinates", "Coordinate"], ["coordinate", "Coordinate"], ["processes", "Process"], ["process", "Process"],
+    ["sends", "Send"], ["send", "Send"]
+  ];
+  for (const [match, replacement] of verbs) {
+    const matchResult = new RegExp(`\\b${escapeRegExp(match)}\\b`).exec(lower);
+    if (matchResult) {
+      const index = matchResult.index;
+      const tail = lower.slice(index + match.length).trim();
+      const words = tail
+        .replace(/[^a-z0-9/\s-]/g, "")
+        .split(/\s+/)
+        .filter((word) => word && !["the", "a", "an", "to", "with", "through", "for", "by", "after", "before"].includes(word))
+        .slice(0, 3)
+        .map(formatToken);
+      return [replacement, ...words].join(" ").trim() || context.fallbackCore;
+    }
+  }
+  return context.fallbackCore;
+}
+
+function edgeLabelFromClause(lower) {
+  if (hasAny(lower, ["approve"])) return "approved";
+  if (hasAny(lower, ["review", "check", "validate"])) return "reviewed";
+  if (hasAny(lower, ["sync", "ship"])) return "synced";
+  if (hasAny(lower, ["notify", "email", "text", "send"])) return "notified";
+  if (hasAny(lower, ["create"])) return "created";
+  if (hasAny(lower, ["update", "track", "record"])) return "updated";
+  return "continue";
+}
+
+function detectPrimaryEntity(lower) {
+  if (hasAny(lower, ["ticket", "support"])) return "case";
+  if (hasAny(lower, ["order", "purchase order"])) return "order";
+  if (hasAny(lower, ["invoice", "billing", "refund"])) return "billing case";
+  if (hasAny(lower, ["lead", "quote", "deal"])) return "opportunity";
+  return "workflow case";
+}
+
+function ownerLabelForLane(lane) {
+  if (lane === "customer") return "Customer";
+  if (lane === "ops") return "Operations";
+  if (lane === "external") return "External";
+  return "Workflow platform";
+}
+
+function localSummaryFromSpecs(specs) {
+  const descriptors = [];
+  if (specs.some((spec) => spec.type === "decision")) descriptors.push("decision points");
+  if (specs.some((spec) => spec.type === "external")) descriptors.push("external handoffs");
+  if (specs.some((spec) => spec.type === "data")) descriptors.push("system-of-record updates");
+  if (specs.some((spec) => spec.type === "automation")) descriptors.push("automation");
+  return descriptors.length
+    ? `A generated flowchart based on extracted workflow steps, with ${descriptors.join(", ")}.`
+    : "A generated flowchart based on extracted workflow steps from the prompt.";
+}
+
+function sentenceCase(text, maxLength) {
+  const value = String(text || "").trim();
+  const capped = value.length > maxLength ? `${value.slice(0, maxLength - 3).trim()}...` : value;
+  return capped.charAt(0).toUpperCase() + capped.slice(1);
+}
+
+function formatToken(token) {
+  const upper = token.toUpperCase();
+  if (["ERP", "CRM", "AI", "PO"].includes(upper)) return upper;
+  return token.charAt(0).toLowerCase() === token.charAt(0)
+    ? token.charAt(0).toUpperCase() + token.slice(1)
+    : token;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildLanes(hasOpsLane, hasExternalLane) {
@@ -626,14 +714,6 @@ function addStep(nodes, idNum, label, type, shape, description, owner, x, laneY)
   return created;
 }
 
-function localSummary(flags) {
-  const parts = ["A generated flowchart tuned to the workflow detail in the prompt"];
-  if (flags.needsApproval) parts.push("with approval branching");
-  if (flags.needsExternal) parts.push("external sync");
-  if (flags.needsDataStore) parts.push("state tracking");
-  if (flags.needsNotify) parts.push("requester updates");
-  return `${parts.join(", ")}.`;
-}
 
 function titleFromPrompt(prompt, isSales, isSupport, isInventory, isFinance) {
   if (isSales) return "Sales Workflow Flowchart";
