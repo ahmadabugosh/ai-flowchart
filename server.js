@@ -39,7 +39,7 @@ const server = http.createServer(async (req, res) => {
         provider,
         model: provider === "local" ? "local-workflow-parser" : settings?.openaiModel || defaultModel,
         user: session ? { email: session.email, hasOpenAIKey: Boolean(settings?.openaiApiKey) } : null,
-        loopsEnabled: Boolean(process.env.LOOPS_API_KEY && process.env.LOOPS_TRANSACTIONAL_ID),
+        loopsEnabled: loopsConfigured(),
         chatgptSubscriptionLoginSupported: false
       });
     }
@@ -48,6 +48,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const email = normalizeEmail(body.email);
       if (!email) return sendJson(res, 400, { error: "A valid email is required." });
+      if (isProductionLike() && !loopsConfigured()) {
+        return sendJson(res, 503, { error: "Loops is not configured for passwordless login." });
+      }
 
       const code = String(crypto.randomInt(100000, 999999));
       const db = await readDb();
@@ -290,7 +293,7 @@ function decrypt(value) {
 }
 
 async function sendLoginCode(email, code) {
-  if (!process.env.LOOPS_API_KEY || !process.env.LOOPS_TRANSACTIONAL_ID) {
+  if (!loopsConfigured()) {
     if (isProductionLike()) {
       throw new Error("Loops is not configured for passwordless login.");
     }
@@ -321,6 +324,10 @@ async function sendLoginCode(email, code) {
 
 function isProductionLike() {
   return process.env.NODE_ENV === "production" || Boolean(process.env.RAILWAY_PROJECT_ID);
+}
+
+function loopsConfigured() {
+  return Boolean(process.env.LOOPS_API_KEY && process.env.LOOPS_TRANSACTIONAL_ID);
 }
 
 async function generateWithOpenAI(prompt, apiKey, model, provider) {
