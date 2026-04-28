@@ -1,6 +1,8 @@
 const svg = document.querySelector("#diagram");
 const promptInput = document.querySelector("#prompt");
+const refinePrompt = document.querySelector("#refinePrompt");
 const generateBtn = document.querySelector("#generateBtn");
+const refineBtn = document.querySelector("#refineBtn");
 const sampleBtn = document.querySelector("#sampleBtn");
 const fitBtn = document.querySelector("#fitBtn");
 const exportSvgBtn = document.querySelector("#exportSvgBtn");
@@ -69,6 +71,7 @@ function bindEvents() {
     button.addEventListener("click", () => showPanel(name));
   });
   generateBtn.addEventListener("click", generate);
+  refineBtn.addEventListener("click", refineDiagram);
   sampleBtn.addEventListener("click", () => {
     const current = samples.indexOf(promptInput.value);
     promptInput.value = samples[(current + 1 + samples.length) % samples.length] || samples[0];
@@ -200,6 +203,29 @@ async function generate() {
   }
 }
 
+async function refineDiagram() {
+  const refinement = refinePrompt.value.trim();
+  if (!refinement || !latestDiagram) return;
+  setBusy(true);
+  try {
+    const result = await fetchJson("/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        prompt: promptInput.value,
+        refinement,
+        currentDiagram: latestDiagram
+      })
+    });
+    latestDiagram = result;
+    render(result);
+  } catch (error) {
+    summary.textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
 function render(diagram) {
   diagramTitle.textContent = diagram.title;
   summary.textContent = diagram.summary;
@@ -228,7 +254,7 @@ function drawLanes(lanes) {
     svg.appendChild(element("rect", {
       x: "24",
       y,
-      width: "1990",
+      width: "2460",
       height: "132",
       fill: index % 2 === 0 ? "#fbfcfd" : "#f4f7fa",
       stroke: "#d8dee6",
@@ -257,15 +283,41 @@ function drawEdge(from, to, label) {
   });
   svg.appendChild(path);
 
-  const text = element("text", {
-    x: (start.x + end.x) / 2,
-    y: (start.y + end.y) / 2 - 10,
+  const labelPoint = edgeLabelPoint(start, end);
+  const labelText = String(label || "").slice(0, 28);
+  const labelWidth = Math.max(42, measureText(labelText, 12, 700) + 18);
+  svg.appendChild(element("rect", {
+    x: labelPoint.x - labelWidth / 2,
+    y: labelPoint.y - 17,
+    width: labelWidth,
+    height: "22",
+    rx: "6",
+    fill: "#ffffff",
+    stroke: "#d8dee6",
+    "stroke-width": "1"
+  }));
+  svg.appendChild(element("text", {
+    x: labelPoint.x,
+    y: labelPoint.y - 2,
     "text-anchor": "middle",
     "font-size": "12",
     "font-weight": "700",
     fill: "#4d5966"
-  }, label);
-  svg.appendChild(text);
+  }, labelText));
+}
+
+function edgeLabelPoint(start, end) {
+  const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+  if (horizontal) {
+    return {
+      x: (start.x + end.x) / 2,
+      y: Math.min(start.y, end.y) - 18
+    };
+  }
+  return {
+    x: Math.max(start.x, end.x) + 58,
+    y: (start.y + end.y) / 2
+  };
 }
 
 function anchor(node, other, mode) {
@@ -275,7 +327,7 @@ function anchor(node, other, mode) {
       ? { x: box.cx, y: box.y }
       : { x: box.cx, y: box.y + box.h };
   }
-  return mode === "out"
+  return other.x >= node.x
     ? { x: box.x + box.w, y: box.cy }
     : { x: box.x, y: box.cy };
 }
@@ -540,7 +592,9 @@ function renderList(target, items = []) {
 
 function setBusy(isBusy) {
   generateBtn.disabled = isBusy;
+  refineBtn.disabled = isBusy;
   generateBtn.textContent = isBusy ? "Generating..." : "↳ Generate";
+  refineBtn.textContent = isBusy ? "Refining..." : "Refine diagram";
 }
 
 async function fetchJson(url, options) {
@@ -562,8 +616,8 @@ async function exportPng() {
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement("canvas");
-    canvas.width = 2050;
-    canvas.height = 680;
+    canvas.width = 2520;
+    canvas.height = 720;
     const context = canvas.getContext("2d");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);

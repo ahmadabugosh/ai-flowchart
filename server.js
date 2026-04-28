@@ -147,6 +147,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/generate") {
       const body = await readJson(req);
       const prompt = String(body.prompt || "").trim();
+      const refinement = String(body.refinement || "").trim();
       if (!prompt) return sendJson(res, 400, { error: "Prompt is required." });
 
       const settings = session ? await getUserSettings(session.email) : null;
@@ -154,8 +155,15 @@ const server = http.createServer(async (req, res) => {
       const key = userKey || process.env.OPENAI_API_KEY;
       const model = settings?.openaiModel || defaultModel;
       const result = key
-        ? await generateWithOpenAI(prompt, key, model, userKey ? "user-openai" : "openai")
-        : generateLocally(prompt);
+        ? await generateWithOpenAI({
+          prompt,
+          refinement,
+          currentDiagram: body.currentDiagram,
+          apiKey: key,
+          model,
+          provider: userKey ? "user-openai" : "openai"
+        })
+        : generateLocally(refinement ? `${prompt}\n\nRefinement: ${refinement}` : prompt);
 
       return sendJson(res, 200, result);
     }
@@ -330,7 +338,7 @@ function loopsConfigured() {
   return Boolean(process.env.LOOPS_API_KEY && process.env.LOOPS_TRANSACTIONAL_ID);
 }
 
-async function generateWithOpenAI(prompt, apiKey, model, provider) {
+async function generateWithOpenAI({ prompt, refinement, currentDiagram, apiKey, model, provider }) {
   const schema = {
     name: "system_architecture_diagram",
     schema: {
@@ -415,9 +423,9 @@ async function generateWithOpenAI(prompt, apiKey, model, provider) {
         {
           role: "system",
           content:
-            "Convert business workflow descriptions into professional flowchart/system diagrams. Include swimlanes for responsible parties, flowchart shapes (terminator, process rectangle, decision diamond, document, database cylinder, external system), explicit decision branches like Yes/No, and operational handoffs. Return only JSON matching the schema. Use stable ids like n1. Keep node labels to 1-4 short words, owner labels to 1-3 words, and descriptions under 70 characters so text fits inside shapes."
+            "Convert business workflow descriptions into professional flowchart/system diagrams. Include swimlanes for responsible parties, flowchart shapes (terminator, process rectangle, decision diamond, document, database cylinder, external system), explicit decision branches like Yes/No, and operational handoffs. Return only JSON matching the schema. Use stable ids like n1. Keep node labels to 1-4 short words, owner labels to 1-3 words, and descriptions under 70 characters so text fits inside shapes. Space nodes generously: leave at least 90px between shape boundaries horizontally and 50px vertically, and place edge labels in open space between shapes."
         },
-        { role: "user", content: prompt }
+        { role: "user", content: buildGenerationPrompt(prompt, refinement, currentDiagram) }
       ],
       text: { format: { type: "json_schema", ...schema } }
     })
@@ -435,6 +443,22 @@ async function generateWithOpenAI(prompt, apiKey, model, provider) {
   return { ...JSON.parse(text), provider, model };
 }
 
+function buildGenerationPrompt(prompt, refinement, currentDiagram) {
+  if (!refinement) return prompt;
+  return [
+    "Original workflow prompt:",
+    prompt,
+    "",
+    "Current diagram JSON:",
+    JSON.stringify(currentDiagram || {}, null, 2).slice(0, 12000),
+    "",
+    "Refinement request:",
+    refinement,
+    "",
+    "Update the diagram to satisfy the refinement while preserving useful existing structure. Return the full revised diagram JSON."
+  ].join("\n");
+}
+
 function generateLocally(prompt) {
   const lower = prompt.toLowerCase();
   const isSales = hasAny(lower, ["lead", "sales", "crm", "quote", "deal"]);
@@ -448,25 +472,25 @@ function generateLocally(prompt) {
 
   const lanes = [
     { id: "customer", label: "Customer / requester", y: 42 },
-    { id: "ops", label: "Operations team", y: 192 },
-    { id: "system", label: "Workflow platform", y: 342 },
-    { id: "external", label: "External systems", y: 492 }
+    { id: "ops", label: "Operations team", y: 212 },
+    { id: "system", label: "Workflow platform", y: 382 },
+    { id: "external", label: "External systems", y: 552 }
   ];
 
   const nodes = [
     node("n1", "Start", "terminator", "terminator", "Workflow begins when a request arrives.", "Customer", 88, 78),
-    node("n2", channel, "intake", "document", "Capture request details, files, and contact data.", "Customer", 270, 64),
-    node("n3", "Review request", "process", "process", "Dispatcher or coordinator checks completeness.", "Operations", 270, 214),
-    node("n4", "Complete?", "decision", "decision", "Decide whether the request has enough detail.", "Operations", 500, 202),
-    node("n5", "Ask for details", "process", "document", "Send a clarification message and pause the case.", "Operations", 500, 64),
-    node("n6", "Classify priority", "automation", "process", "AI suggests category, urgency, and owner.", "Workflow platform", 720, 364),
-    node("n7", "Approval needed?", "decision", "decision", "Branch if quote, refund, exception, or manager approval is required.", "Workflow platform", 935, 352),
-    node("n8", "Manager approval", "process", "process", "Responsible manager approves, rejects, or requests changes.", "Operations", 935, 214),
-    node("n9", core, "process", "process", "Create the operational record and assign ownership.", "Workflow platform", 1160, 364),
-    node("n10", record, "data", "database", "Persist state, audit events, and reference data.", "Workflow platform", 1390, 364),
-    node("n11", external, "external", "external", "Sync updates with the required third-party system.", "External", 1390, 514),
-    node("n12", "Notify requester", "process", "document", "Send status, schedule, quote, or completion update.", "Workflow platform", 1620, 364),
-    node("n13", "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", 1840, 78)
+    node("n2", channel, "intake", "document", "Capture request details, files, and contact data.", "Customer", 330, 64),
+    node("n3", "Review request", "process", "process", "Dispatcher or coordinator checks completeness.", "Operations", 330, 234),
+    node("n4", "Complete?", "decision", "decision", "Decide whether the request has enough detail.", "Operations", 650, 222),
+    node("n5", "Ask for details", "process", "document", "Send a clarification message and pause the case.", "Operations", 650, 64),
+    node("n6", "Classify priority", "automation", "process", "AI suggests category, urgency, and owner.", "Workflow platform", 970, 404),
+    node("n7", "Approval needed?", "decision", "decision", "Branch if quote, refund, exception, or manager approval is required.", "Workflow platform", 1280, 392),
+    node("n8", "Manager approval", "process", "process", "Responsible manager approves, rejects, or requests changes.", "Operations", 1280, 234),
+    node("n9", core, "process", "process", "Create the operational record and assign ownership.", "Workflow platform", 1600, 404),
+    node("n10", record, "data", "database", "Persist state, audit events, and reference data.", "Workflow platform", 1900, 404),
+    node("n11", external, "external", "external", "Sync updates with the required third-party system.", "External", 1900, 574),
+    node("n12", "Notify requester", "process", "document", "Send status, schedule, quote, or completion update.", "Workflow platform", 2100, 404),
+    node("n13", "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", 2360, 78)
   ];
 
   const edges = [

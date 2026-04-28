@@ -127,6 +127,10 @@ textarea {
   resize: vertical;
 }
 
+.compact-textarea {
+  min-height: 96px;
+}
+
 textarea:focus,
 input:focus {
   outline: 3px solid rgba(15, 123, 108, 0.18);
@@ -196,10 +200,16 @@ input:focus {
 }
 
 .settings-panel,
+.refine-panel,
 .notes-panel,
 .inspector {
   border-top: 1px solid var(--line);
   padding-top: 18px;
+}
+
+.refine-panel {
+  display: grid;
+  gap: 10px;
 }
 
 .connection-list {
@@ -281,8 +291,8 @@ ul {
 }
 
 #diagram {
-  width: 2050px;
-  height: 680px;
+  width: 2520px;
+  height: 720px;
   display: block;
   background: #fff;
   border: 1px solid var(--line);

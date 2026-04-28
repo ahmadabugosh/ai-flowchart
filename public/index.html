@@ -35,6 +35,12 @@
             <button id="sampleBtn" type="button">Sample</button>
           </div>
 
+          <section class="refine-panel" aria-label="Refine generated diagram">
+            <label for="refinePrompt">Refine prompt</label>
+            <textarea id="refinePrompt" class="compact-textarea" spellcheck="true" placeholder="Example: add finance approval before invoicing, split customer and dispatcher responsibilities, show the rejection path."></textarea>
+            <button id="refineBtn" type="button">Refine diagram</button>
+          </section>
+
           <section class="settings-panel" aria-label="Model connection">
             <div>
               <h2>Model connection</h2>
@@ -133,7 +139,7 @@
           </div>
         </header>
         <div class="canvas-stage" id="stage">
-          <svg id="diagram" role="img" aria-labelledby="diagramTitle" viewBox="0 0 2050 680"></svg>
+          <svg id="diagram" role="img" aria-labelledby="diagramTitle" viewBox="0 0 2520 720"></svg>
         </div>
         <footer class="inspector">
           <div>
