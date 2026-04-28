@@ -465,58 +465,126 @@ function generateLocally(prompt) {
   const isSupport = hasAny(lower, ["ticket", "support", "customer service", "helpdesk"]);
   const isInventory = hasAny(lower, ["inventory", "warehouse", "fulfillment", "order", "shipment"]);
   const isFinance = hasAny(lower, ["invoice", "payment", "billing", "refund"]);
-  const channel = hasAny(lower, ["email"]) ? "Email / web intake" : hasAny(lower, ["form", "portal"]) ? "Portal intake" : "Request intake";
-  const core = isSupport ? "Create support case" : isInventory ? "Create order record" : isSales ? "Create opportunity" : "Create workflow case";
+  const channel = hasAny(lower, ["email"]) ? "Email intake" : hasAny(lower, ["form", "portal", "website"]) ? "Portal intake" : "Request intake";
+  const core = isSupport ? "Create case" : isInventory ? "Create order" : isSales ? "Create opportunity" : isFinance ? "Create billing case" : "Create workflow case";
   const record = isFinance ? "Billing ledger" : isInventory ? "Inventory database" : isSales ? "CRM records" : "Operations database";
   const external = isFinance ? "Payment provider" : isInventory ? "Carrier / ERP" : isSales ? "CRM / quoting tool" : "External system";
+  const actionCount = estimateActionCount(lower);
+  const needsReview = actionCount >= 3 || hasAny(lower, ["review", "check", "validate", "qualify", "triage"]);
+  const needsCompletenessDecision = actionCount >= 5 || hasAny(lower, ["details", "complete", "missing", "validate"]);
+  const needsAI = hasAny(lower, ["classify", "priority", "urgent", "triage", "ai"]);
+  const needsApproval = hasAny(lower, ["approve", "approval", "quote", "exception", "manager", "refund", "budget", "signoff"]);
+  const needsDataStore = actionCount >= 3 || hasAny(lower, ["record", "database", "ledger", "crm", "erp", "track", "store", "update"]);
+  const needsExternal = hasAny(lower, ["erp", "crm", "payment", "carrier", "ship", "shipment", "vendor", "supplier", "quickbooks", "external", "sync"]);
+  const needsNotify = hasAny(lower, ["notify", "email", "text", "update", "message"]) || actionCount >= 2;
+  const hasOpsLane = needsReview || needsCompletenessDecision || needsApproval;
+  const hasExternalLane = needsExternal;
 
-  const lanes = [
-    { id: "customer", label: "Customer / requester", y: 42 },
-    { id: "ops", label: "Operations team", y: 212 },
-    { id: "system", label: "Workflow platform", y: 382 },
-    { id: "external", label: "External systems", y: 552 }
-  ];
+  const lanes = buildLanes(hasOpsLane, hasExternalLane);
+  const laneY = Object.fromEntries(lanes.map((lane) => [lane.id, lane.y]));
+  const nodes = [];
+  const edges = [];
+  let nodeIndex = 1;
+  let x = 88;
+  const gap = 280;
+  let previousMainApproval = null;
 
-  const nodes = [
-    node("n1", "Start", "terminator", "terminator", "Workflow begins when a request arrives.", "Customer", 88, 78),
-    node("n2", channel, "intake", "document", "Capture request details, files, and contact data.", "Customer", 330, 64),
-    node("n3", "Review request", "process", "process", "Dispatcher or coordinator checks completeness.", "Operations", 330, 234),
-    node("n4", "Complete?", "decision", "decision", "Decide whether the request has enough detail.", "Operations", 650, 222),
-    node("n5", "Ask for details", "process", "document", "Send a clarification message and pause the case.", "Operations", 650, 64),
-    node("n6", "Classify priority", "automation", "process", "AI suggests category, urgency, and owner.", "Workflow platform", 970, 404),
-    node("n7", "Approval needed?", "decision", "decision", "Branch if quote, refund, exception, or manager approval is required.", "Workflow platform", 1280, 392),
-    node("n8", "Manager approval", "process", "process", "Responsible manager approves, rejects, or requests changes.", "Operations", 1280, 234),
-    node("n9", core, "process", "process", "Create the operational record and assign ownership.", "Workflow platform", 1600, 404),
-    node("n10", record, "data", "database", "Persist state, audit events, and reference data.", "Workflow platform", 1900, 404),
-    node("n11", external, "external", "external", "Sync updates with the required third-party system.", "External", 1900, 574),
-    node("n12", "Notify requester", "process", "document", "Send status, schedule, quote, or completion update.", "Workflow platform", 2260, 404),
-    node("n13", "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", 2660, 78)
-  ];
+  const start = addStep(nodes, nodeIndex++, "Start", "terminator", "terminator", "Workflow begins when a request arrives.", "Customer", x, laneY.customer);
+  x += gap;
+  const intake = addStep(nodes, nodeIndex++, channel, "intake", "document", "Capture request details and source context.", "Customer", x, laneY.customer);
+  let previousMain = intake;
 
-  const edges = [
-    edge("n1", "n2", "request"),
-    edge("n2", "n3", "submitted"),
-    edge("n3", "n4", "triage"),
-    edge("n4", "n5", "No"),
-    edge("n5", "n2", "resubmit"),
-    edge("n4", "n6", "Yes"),
-    edge("n6", "n7", "routed"),
-    edge("n7", "n8", "Yes"),
-    edge("n8", "n9", "approved"),
-    edge("n7", "n9", "No"),
-    edge("n9", "n10", "write state"),
-    edge("n9", "n11", "sync"),
-    edge("n10", "n12", "status"),
-    edge("n11", "n12", "confirmation"),
-    edge("n12", "n13", "closed")
-  ];
+  if (needsReview) {
+    x += gap;
+    const review = addStep(nodes, nodeIndex++, "Review request", "process", "process", "Check scope, completeness, and routing needs.", "Operations", x, laneY.ops || laneY.system);
+    edges.push(edge(start.id, intake.id, "request"));
+    edges.push(edge(intake.id, review.id, "submitted"));
+    previousMain = review;
+  } else {
+    edges.push(edge(start.id, intake.id, "request"));
+  }
+
+  if (needsCompletenessDecision) {
+    x += gap;
+    const complete = addStep(nodes, nodeIndex++, "Complete?", "decision", "decision", "Decide whether the request has enough detail.", "Operations", x, laneY.ops || laneY.system);
+    const askDetails = addStep(nodes, nodeIndex++, "Ask for details", "process", "document", "Request missing information and reopen intake.", "Operations", x, laneY.customer);
+    edges.push(edge(previousMain.id, complete.id, needsReview ? "triage" : "review"));
+    edges.push(edge(complete.id, askDetails.id, "No"));
+    edges.push(edge(askDetails.id, intake.id, "resubmit"));
+    previousMain = complete;
+  }
+
+  if (needsAI) {
+    x += gap;
+    const classify = addStep(nodes, nodeIndex++, "Classify priority", "automation", "process", "Suggest urgency, type, and routing owner.", "Workflow platform", x, laneY.system);
+    edges.push(edge(previousMain.id, classify.id, previousMain.shape === "decision" ? "Yes" : "route"));
+    previousMain = classify;
+  }
+
+  if (needsApproval) {
+    x += gap;
+    const approvalNeeded = addStep(nodes, nodeIndex++, "Approval needed?", "decision", "decision", "Branch if policy or manager approval is required.", "Workflow platform", x, laneY.system);
+    const managerApproval = addStep(nodes, nodeIndex++, "Manager approval", "process", "process", "Approve, reject, or request changes.", "Operations", x, laneY.ops || laneY.system);
+    edges.push(edge(previousMain.id, approvalNeeded.id, previousMain.shape === "decision" ? "Yes" : "route"));
+    previousMain = approvalNeeded;
+    previousMainApproval = managerApproval;
+  }
+
+  x += gap;
+  const coreNode = addStep(nodes, nodeIndex++, core, "process", "process", "Create the main operational record and assign ownership.", "Workflow platform", x, laneY.system);
+
+  if (previousMain.shape === "decision" && previousMainApproval) {
+    edges.push(edge(previousMain.id, previousMainApproval.id, "Yes"));
+    edges.push(edge(previousMainApproval.id, coreNode.id, "approved"));
+    edges.push(edge(previousMain.id, coreNode.id, "No"));
+  } else {
+    edges.push(edge(previousMain.id, coreNode.id, previousMain.shape === "decision" ? "Yes" : "continue"));
+  }
+
+  previousMain = coreNode;
+
+  let recordNode = null;
+  if (needsDataStore) {
+    x += gap;
+    recordNode = addStep(nodes, nodeIndex++, record, "data", "database", "Persist workflow state, audit events, and reference data.", "Workflow platform", x, laneY.system);
+    edges.push(edge(previousMain.id, recordNode.id, "write state"));
+    previousMain = recordNode;
+  }
+
+  let externalNode = null;
+  if (needsExternal) {
+    const externalSource = recordNode || coreNode;
+    externalNode = addStep(nodes, nodeIndex++, external, "external", "external", "Sync or enrich with a third-party system.", "External", externalSource.x, laneY.external);
+    edges.push(edge(externalSource.id, externalNode.id, "sync"));
+  }
+
+  let notifyNode = null;
+  if (needsNotify) {
+    x += gap;
+    notifyNode = addStep(nodes, nodeIndex++, "Notify requester", "process", "document", "Send status, approval, schedule, or completion update.", "Workflow platform", x, laneY.system);
+    edges.push(edge((recordNode || coreNode).id, notifyNode.id, "status"));
+    if (externalNode) edges.push(edge(externalNode.id, notifyNode.id, "confirmation"));
+    previousMain = notifyNode;
+  }
+
+  x += gap;
+  const doneNode = addStep(nodes, nodeIndex++, "Done", "terminator", "terminator", "Workflow reaches a tracked terminal state.", "Customer", x, laneY.customer);
+  edges.push(edge((notifyNode || recordNode || coreNode).id, doneNode.id, "closed"));
 
   return {
     provider: "local",
     model: "local-workflow-parser",
     title: titleFromPrompt(prompt, isSales, isSupport, isInventory, isFinance),
     summary:
-      "A swimlane flowchart showing intake, triage, decision branches, approvals, platform automation, data persistence, external sync, and customer notification.",
+      localSummary({
+        needsReview,
+        needsCompletenessDecision,
+        needsAI,
+        needsApproval,
+        needsDataStore,
+        needsExternal,
+        needsNotify
+      }),
     lanes,
     nodes,
     edges,
@@ -535,6 +603,36 @@ function generateLocally(prompt) {
 
 function hasAny(text, terms) {
   return terms.some((term) => text.includes(term));
+}
+
+function estimateActionCount(text) {
+  const matches = text.match(/\b(receive|submit|check|review|validate|qualify|approve|route|create|sync|update|track|notify|email|text|schedule|ship|invoice|refund|classify|escalate)\b/g);
+  return Math.max(1, matches?.length || 0);
+}
+
+function buildLanes(hasOpsLane, hasExternalLane) {
+  const lanes = [{ id: "customer", label: "Customer / requester", y: 42 }];
+  if (hasOpsLane) lanes.push({ id: "ops", label: "Operations team", y: 212 });
+  lanes.push({ id: "system", label: "Workflow platform", y: hasOpsLane ? 382 : 252 });
+  if (hasExternalLane) lanes.push({ id: "external", label: "External systems", y: hasOpsLane ? 552 : 422 });
+  return lanes;
+}
+
+function addStep(nodes, idNum, label, type, shape, description, owner, x, laneY) {
+  const id = `n${idNum}`;
+  const y = shape === "decision" ? laneY + 10 : shape === "terminator" ? laneY + 36 : laneY + 22;
+  const created = node(id, label, type, shape, description, owner, x, y);
+  nodes.push(created);
+  return created;
+}
+
+function localSummary(flags) {
+  const parts = ["A generated flowchart tuned to the workflow detail in the prompt"];
+  if (flags.needsApproval) parts.push("with approval branching");
+  if (flags.needsExternal) parts.push("external sync");
+  if (flags.needsDataStore) parts.push("state tracking");
+  if (flags.needsNotify) parts.push("requester updates");
+  return `${parts.join(", ")}.`;
 }
 
 function titleFromPrompt(prompt, isSales, isSupport, isInventory, isFinance) {
