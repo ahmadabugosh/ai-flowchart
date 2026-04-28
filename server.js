@@ -415,7 +415,7 @@ async function generateWithOpenAI(prompt, apiKey, model, provider) {
         {
           role: "system",
           content:
-            "Convert business workflow descriptions into professional flowchart/system diagrams. Include swimlanes for responsible parties, flowchart shapes (terminator, process rectangle, decision diamond, document, database cylinder, external system), explicit decision branches like Yes/No, and operational handoffs. Return only JSON matching the schema. Use stable ids like n1."
+            "Convert business workflow descriptions into professional flowchart/system diagrams. Include swimlanes for responsible parties, flowchart shapes (terminator, process rectangle, decision diamond, document, database cylinder, external system), explicit decision branches like Yes/No, and operational handoffs. Return only JSON matching the schema. Use stable ids like n1. Keep node labels to 1-4 short words, owner labels to 1-3 words, and descriptions under 70 characters so text fits inside shapes."
         },
         { role: "user", content: prompt }
       ],

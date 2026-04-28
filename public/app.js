@@ -54,6 +54,7 @@ const samples = [
 
 let latestDiagram = null;
 let appConfig = null;
+let clipCounter = 0;
 
 init();
 
@@ -206,6 +207,7 @@ function render(diagram) {
   renderList(assumptions, diagram.assumptions);
 
   svg.replaceChildren();
+  clipCounter = 0;
   const defs = element("defs");
   defs.appendChild(marker());
   svg.appendChild(defs);
@@ -279,7 +281,7 @@ function anchor(node, other, mode) {
 }
 
 function bounds(node) {
-  const size = node.shape === "decision" ? { w: 150, h: 112 } : { w: 170, h: 86 };
+  const size = node.shape === "decision" ? { w: 166, h: 118 } : { w: 184, h: 92 };
   if (node.shape === "terminator") return { x: node.x, y: node.y, w: 142, h: 58, cx: node.x + 71, cy: node.y + 29 };
   return { x: node.x, y: node.y, w: size.w, h: size.h, cx: node.x + size.w / 2, cy: node.y + size.h / 2 };
 }
@@ -289,40 +291,144 @@ function drawNode(node) {
   const group = element("g", { tabindex: "0" });
   const b = bounds(node);
   drawShape(group, node, b, fill, stroke);
-
-  const titleY = node.shape === "decision" ? node.y + 48 : node.y + 28;
-  const titleLines = wrap(node.label, node.shape === "decision" ? 16 : 20).slice(0, 2);
-  titleLines.forEach((line, index) => {
-    group.appendChild(element("text", {
-      x: b.cx,
-      y: titleY + index * 15,
-      "text-anchor": "middle",
-      "font-size": "13",
-      "font-weight": "800",
-      fill: "#17202a"
-    }, line));
-  });
-
-  if (node.shape !== "decision" && node.shape !== "terminator") {
-    group.appendChild(element("text", {
-      x: b.x + 14,
-      y: b.y + 54,
-      "font-size": "10",
-      "font-weight": "800",
-      fill: stroke
-    }, node.owner || node.type.toUpperCase()));
-    const wrapped = wrap(node.description, 24).slice(0, 1);
-    wrapped.forEach((line, index) => {
-      group.appendChild(element("text", {
-        x: b.x + 14,
-        y: b.y + 72 + index * 13,
-        "font-size": "10",
-        fill: "#4e5b67"
-      }, line));
-    });
-  }
+  addContainedText(group, node, b, stroke);
 
   svg.appendChild(group);
+}
+
+function addContainedText(group, node, b, stroke) {
+  const clipId = `node-clip-${clipCounter++}`;
+  const clipPath = element("clipPath", { id: clipId });
+  clipPath.appendChild(clipShape(node, b));
+  svg.querySelector("defs").appendChild(clipPath);
+
+  const textGroup = element("g", { "clip-path": `url(#${clipId})` });
+  const content = textContentForNode(node);
+  const area = textArea(node, b);
+  const layout = fitText(content, area.width, area.height, {
+    maxFont: node.shape === "terminator" ? 13 : 12,
+    minFont: 8,
+    maxLines: node.shape === "terminator" ? 2 : node.shape === "decision" ? 3 : 5,
+    weight: 780
+  });
+
+  const lineHeight = Math.ceil(layout.fontSize * 1.22);
+  const totalHeight = lineHeight * layout.lines.length;
+  const firstBaseline = area.y + Math.max(layout.fontSize, (area.height - totalHeight) / 2 + layout.fontSize);
+  layout.lines.forEach((line, index) => {
+    textGroup.appendChild(element("text", {
+      x: area.x + area.width / 2,
+      y: firstBaseline + index * lineHeight,
+      "text-anchor": "middle",
+      "font-size": String(layout.fontSize),
+      "font-weight": index === 0 ? "800" : "650",
+      fill: index === 1 && node.shape !== "decision" && node.shape !== "terminator" ? stroke : "#17202a",
+      "dominant-baseline": "alphabetic"
+    }, line));
+  });
+  group.appendChild(textGroup);
+}
+
+function textContentForNode(node) {
+  if (node.shape === "terminator") return node.label;
+  if (node.shape === "decision") return node.label;
+  const owner = node.owner || node.type;
+  return `${node.label}\n${owner}\n${node.description || ""}`;
+}
+
+function textArea(node, b) {
+  if (node.shape === "decision") {
+    return {
+      x: b.x + b.w * 0.25,
+      y: b.y + b.h * 0.25,
+      width: b.w * 0.5,
+      height: b.h * 0.5
+    };
+  }
+  if (node.shape === "terminator") {
+    return { x: b.x + 18, y: b.y + 12, width: b.w - 36, height: b.h - 24 };
+  }
+  if (node.shape === "external") {
+    return { x: b.x + 28, y: b.y + 12, width: b.w - 56, height: b.h - 24 };
+  }
+  if (node.shape === "document") {
+    return { x: b.x + 16, y: b.y + 12, width: b.w - 32, height: b.h - 30 };
+  }
+  if (node.shape === "database") {
+    return { x: b.x + 18, y: b.y + 22, width: b.w - 36, height: b.h - 34 };
+  }
+  return { x: b.x + 14, y: b.y + 12, width: b.w - 28, height: b.h - 24 };
+}
+
+function fitText(text, maxWidth, maxHeight, options) {
+  for (let fontSize = options.maxFont; fontSize >= options.minFont; fontSize -= 1) {
+    const lineHeight = Math.ceil(fontSize * 1.22);
+    const maxLines = Math.min(options.maxLines, Math.floor(maxHeight / lineHeight));
+    const lines = wrapSvgText(text, maxWidth, fontSize, maxLines);
+    if (lines.length <= maxLines && lines.every((line) => measureText(line, fontSize, options.weight) <= maxWidth)) {
+      return { fontSize, lines };
+    }
+  }
+  const lineHeight = Math.ceil(options.minFont * 1.22);
+  const maxLines = Math.max(1, Math.min(options.maxLines, Math.floor(maxHeight / lineHeight)));
+  return {
+    fontSize: options.minFont,
+    lines: wrapSvgText(text, maxWidth, options.minFont, maxLines)
+  };
+}
+
+function wrapSvgText(text, maxWidth, fontSize, maxLines) {
+  const sourceLines = String(text || "").split(/\n+/).flatMap((line) => line.trim().split(/\s+/).filter(Boolean));
+  const lines = [];
+  let line = "";
+  for (const word of sourceLines) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (measureText(candidate, fontSize) <= maxWidth) {
+      line = candidate;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = fitWord(word, maxWidth, fontSize);
+    if (lines.length === maxLines - 1) break;
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  if (lines.length === maxLines) {
+    lines[maxLines - 1] = ellipsize(lines[maxLines - 1], maxWidth, fontSize);
+  }
+  return lines.length ? lines : [""];
+}
+
+function fitWord(word, maxWidth, fontSize) {
+  if (measureText(word, fontSize) <= maxWidth) return word;
+  return ellipsize(word, maxWidth, fontSize);
+}
+
+function ellipsize(text, maxWidth, fontSize) {
+  let value = String(text || "");
+  while (value.length > 1 && measureText(`${value}...`, fontSize) > maxWidth) {
+    value = value.slice(0, -1);
+  }
+  return value.length > 1 ? `${value}...` : "...";
+}
+
+function measureText(text, fontSize, fontWeight = 650) {
+  const weightFactor = Number(fontWeight) >= 750 ? 0.59 : 0.54;
+  return String(text || "").length * fontSize * weightFactor;
+}
+
+function clipShape(node, b) {
+  if (node.shape === "decision") {
+    return element("polygon", {
+      points: `${b.cx},${b.y + 4} ${b.x + b.w - 4},${b.cy} ${b.cx},${b.y + b.h - 4} ${b.x + 4},${b.cy}`
+    });
+  }
+  if (node.shape === "terminator") {
+    return element("rect", { x: b.x + 4, y: b.y + 4, width: b.w - 8, height: b.h - 8, rx: "25" });
+  }
+  if (node.shape === "external") {
+    return element("path", { d: `M ${b.x + 22} ${b.y + 4} H ${b.x + b.w - 6} L ${b.x + b.w - 22} ${b.y + b.h - 4} H ${b.x + 6} Z` });
+  }
+  return element("rect", { x: b.x + 4, y: b.y + 4, width: b.w - 8, height: b.h - 8, rx: "6" });
 }
 
 function drawShape(group, node, b, fill, stroke) {
