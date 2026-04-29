@@ -133,7 +133,11 @@ const server = http.createServer(async (req, res) => {
       settings.openaiModel = String(body.openaiModel || defaultModel).trim() || defaultModel;
       if (typeof body.openaiApiKey === "string" && body.openaiApiKey.trim()) {
         const cleanKey = body.openaiApiKey.trim();
-        await validateOpenAICredentials(cleanKey, settings.openaiModel);
+        try {
+          await validateOpenAICredentials(cleanKey, settings.openaiModel);
+        } catch (error) {
+          return sendJson(res, 400, { error: error.message || "OpenAI key validation failed." });
+        }
         settings.openaiApiKey = encrypt(cleanKey);
         settings.openaiKeyHint = keyHint(cleanKey);
         settings.openaiKeyValidatedAt = new Date().toISOString();
@@ -455,22 +459,25 @@ async function generateWithOpenAI({ prompt, refinement, currentDiagram, apiKey, 
 }
 
 async function validateOpenAICredentials(apiKey, model) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
+  const response = await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
+    method: "GET",
     headers: {
-      "content-type": "application/json",
       authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      input: "Reply with OK",
-      max_output_tokens: 1
-    })
+    }
   });
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`OpenAI key validation failed: ${response.status} ${detail}`);
+    if (response.status === 401) {
+      throw new Error("OpenAI rejected that API key. Check that the key is correct and active.");
+    }
+    if (response.status === 403) {
+      throw new Error(`That key does not have access to model '${model}'. Try another model or a different project key.`);
+    }
+    if (response.status === 404) {
+      throw new Error(`Model '${model}' was not found for that key. Check the model name.`);
+    }
+    throw new Error(`OpenAI validation failed for model '${model}': ${response.status} ${detail}`);
   }
 }
 
