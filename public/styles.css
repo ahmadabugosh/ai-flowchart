@@ -250,6 +250,36 @@ input:focus {
   font-weight: 700;
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f6f7f9;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.status-badge.success {
+  border-color: rgba(15, 123, 108, 0.28);
+  background: rgba(15, 123, 108, 0.08);
+  color: var(--accent-dark);
+}
+
+.status-badge.error {
+  border-color: rgba(169, 63, 60, 0.28);
+  background: rgba(169, 63, 60, 0.08);
+  color: var(--danger);
+}
+
+.status-badge.muted {
+  color: var(--muted);
+}
+
 ul {
   margin: 10px 0 0;
   padding-left: 18px;

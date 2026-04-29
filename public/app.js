@@ -21,6 +21,7 @@ const settingsForm = document.querySelector("#settingsForm");
 const openaiApiKey = document.querySelector("#openaiApiKey");
 const openaiModel = document.querySelector("#openaiModel");
 const keyState = document.querySelector("#keyState");
+const keyBadge = document.querySelector("#keyBadge");
 const clearKeyBtn = document.querySelector("#clearKeyBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const loopsStatus = document.querySelector("#loopsStatus");
@@ -57,6 +58,7 @@ const samples = [
 let latestDiagram = null;
 let appConfig = null;
 let clipCounter = 0;
+let saveSettingsBtn = document.querySelector("#saveSettingsBtn");
 
 init();
 
@@ -121,9 +123,10 @@ async function loadSettings() {
   try {
     const settings = await fetchJson("/api/settings");
     openaiModel.value = settings.openaiModel;
-    keyState.textContent = settings.hasOpenAIKey ? "A user OpenAI key is saved." : "No user key saved.";
+    renderKeyState(settings);
   } catch {
     keyState.textContent = "Login to view settings.";
+    setKeyBadge("Login required", "muted");
   }
 }
 
@@ -153,27 +156,35 @@ async function verifyLoginCode(event) {
 
 async function saveSettings(event) {
   event.preventDefault();
-  await fetchJson("/api/settings", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      openaiApiKey: openaiApiKey.value,
-      openaiModel: openaiModel.value
-    })
-  });
-  openaiApiKey.value = "";
-  await loadConfig();
-  keyState.textContent = "Settings saved.";
+  setKeyBadge("Verifying key...", "muted");
+  try {
+    const result = await fetchJson("/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        openaiApiKey: openaiApiKey.value,
+        openaiModel: openaiModel.value
+      })
+    });
+    openaiApiKey.value = "";
+    await loadConfig();
+    renderKeyState(result);
+    setKeyBadge("Key saved and verified", "success");
+  } catch (error) {
+    keyState.textContent = error.message;
+    setKeyBadge("Key validation failed", "error");
+  }
 }
 
 async function clearKey() {
-  await fetchJson("/api/settings", {
+  const result = await fetchJson("/api/settings", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ clearOpenAIKey: true, openaiModel: openaiModel.value })
   });
   await loadConfig();
-  keyState.textContent = "OpenAI key cleared.";
+  renderKeyState(result);
+  setKeyBadge("No key connected", "muted");
 }
 
 async function logout() {
@@ -227,6 +238,9 @@ async function refineDiagram() {
 }
 
 function render(diagram) {
+  const laidOut = normalizeDiagramLayout(diagram);
+  applyCanvasSize(laidOut.layout);
+  diagram = laidOut;
   diagramTitle.textContent = diagram.title;
   summary.textContent = diagram.summary;
   renderList(risks, diagram.risks);
@@ -237,7 +251,7 @@ function render(diagram) {
   const defs = element("defs");
   defs.appendChild(marker());
   svg.appendChild(defs);
-  drawLanes(diagram.lanes || []);
+  drawLanes(diagram.lanes || [], diagram.layout);
 
   for (const edge of diagram.edges) {
     const from = diagram.nodes.find((node) => node.id === edge.from);
@@ -248,14 +262,14 @@ function render(diagram) {
   for (const node of diagram.nodes) drawNode(node);
 }
 
-function drawLanes(lanes) {
+function drawLanes(lanes, layout) {
   lanes.forEach((lane, index) => {
     const y = lane.y;
     svg.appendChild(element("rect", {
       x: "24",
       y,
-      width: "2800",
-      height: "132",
+      width: String(layout.width - 48),
+      height: String(layout.laneHeight),
       fill: index % 2 === 0 ? "#fbfcfd" : "#f4f7fa",
       stroke: "#d8dee6",
       "stroke-width": "1"
@@ -311,11 +325,11 @@ function edgeLabelPoint(start, end) {
   if (horizontal) {
     return {
       x: (start.x + end.x) / 2,
-      y: Math.min(start.y, end.y) - 18
+      y: Math.min(start.y, end.y) - 28
     };
   }
   return {
-    x: Math.max(start.x, end.x) + 58,
+    x: Math.max(start.x, end.x) + 72,
     y: (start.y + end.y) / 2
   };
 }
@@ -593,6 +607,7 @@ function renderList(target, items = []) {
 function setBusy(isBusy) {
   generateBtn.disabled = isBusy;
   refineBtn.disabled = isBusy;
+  saveSettingsBtn.disabled = isBusy;
   generateBtn.textContent = isBusy ? "Generating..." : "↳ Generate";
   refineBtn.textContent = isBusy ? "Refining..." : "Refine diagram";
 }
@@ -616,8 +631,8 @@ async function exportPng() {
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement("canvas");
-    canvas.width = 2860;
-    canvas.height = 720;
+    canvas.width = Number(svg.dataset.exportWidth || 2860);
+    canvas.height = Number(svg.dataset.exportHeight || 720);
     const context = canvas.getContext("2d");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -645,4 +660,145 @@ function element(name, attrs = {}, text = "") {
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
   if (text) el.textContent = text;
   return el;
+}
+
+function renderKeyState(settings) {
+  if (settings.hasOpenAIKey) {
+    const tested = settings.openaiKeyValidatedAt ? new Date(settings.openaiKeyValidatedAt).toLocaleString() : "just now";
+    const hint = settings.openaiKeyHint ? ` ending in ${settings.openaiKeyHint}` : "";
+    keyState.textContent = `Saved OpenAI key${hint}. Verified with ${settings.openaiModel} on ${tested}.`;
+    setKeyBadge("Connected", "success");
+    return;
+  }
+  keyState.textContent = "No user key saved.";
+  setKeyBadge("No key connected", "muted");
+}
+
+function setKeyBadge(text, state) {
+  keyBadge.textContent = text;
+  keyBadge.className = `status-badge ${state}`;
+}
+
+function normalizeDiagramLayout(diagram) {
+  const lanes = normalizeLanes(diagram.lanes || [], diagram.nodes || []);
+  const laneIndex = new Map(lanes.map((lane, index) => [lane.id, index]));
+  const nodeMap = new Map(diagram.nodes.map((node) => [node.id, { ...node }]));
+  const levels = computeLevels(diagram.nodes, diagram.edges || []);
+  const columns = new Map();
+  const laneCounts = new Map();
+
+  for (const node of nodeMap.values()) {
+    node.laneId = inferLaneId(node, lanes);
+    const level = levels.get(node.id) || 0;
+    const key = `${node.laneId}:${level}`;
+    const count = laneCounts.get(key) || 0;
+    laneCounts.set(key, count + 1);
+    node._level = level;
+    node._slot = count;
+    if (!columns.has(level)) columns.set(level, []);
+    columns.get(level).push(node);
+  }
+
+  const orderedLevels = [...columns.keys()].sort((a, b) => a - b);
+  const levelWidths = new Map(orderedLevels.map((level) => {
+    const width = Math.max(...columns.get(level).map((node) => bounds(node).w));
+    return [level, width];
+  }));
+
+  const xByLevel = new Map();
+  let cursor = 96;
+  for (const level of orderedLevels) {
+    xByLevel.set(level, cursor);
+    cursor += levelWidths.get(level) + 180;
+  }
+
+  const laneHeight = Math.max(150, maxLaneHeight(laneCounts));
+  lanes.forEach((lane, index) => {
+    lane.y = 42 + index * laneHeight;
+  });
+
+  for (const node of nodeMap.values()) {
+    const lanePos = lanes[laneIndex.get(node.laneId)]?.y || 42;
+    node.x = xByLevel.get(node._level) || 96;
+    node.y = lanePos + 26 + node._slot * 116;
+    if (node.shape === "decision") node.y += 10;
+    if (node.shape === "terminator") node.y += 18;
+  }
+
+  const width = Math.max(2860, cursor + 220);
+  const height = Math.max(720, 42 + lanes.length * laneHeight + 40);
+  return {
+    ...diagram,
+    lanes,
+    nodes: [...nodeMap.values()],
+    layout: { width, height, laneHeight: laneHeight - 18 }
+  };
+}
+
+function normalizeLanes(lanes, nodes) {
+  if (lanes.length) return lanes.map((lane) => ({ ...lane }));
+  return [
+    { id: "customer", label: "Customer / requester", y: 42 },
+    { id: "ops", label: "Operations team", y: 212 },
+    { id: "system", label: "Workflow platform", y: 382 }
+  ].slice(0, Math.max(2, nodes.length ? 3 : 2));
+}
+
+function inferLaneId(node, lanes) {
+  const owner = String(node.owner || "").toLowerCase();
+  if (owner.includes("customer") || owner.includes("requester")) return "customer";
+  if (owner.includes("external") || owner.includes("vendor") || owner.includes("supplier")) return "external";
+  if (owner.includes("sales") || owner.includes("finance") || owner.includes("legal") || owner.includes("operations") || owner.includes("rep") || owner.includes("dispatcher")) return "ops";
+  if (lanes.some((lane) => lane.id === "system")) return "system";
+  return nearestLaneByY(node, lanes);
+}
+
+function nearestLaneByY(node, lanes) {
+  return [...lanes].sort((a, b) => Math.abs(a.y - node.y) - Math.abs(b.y - node.y))[0]?.id || "system";
+}
+
+function computeLevels(nodes, edges) {
+  const levels = new Map(nodes.map((node) => [node.id, 0]));
+  const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(nodes.map((node) => [node.id, []]));
+  for (const edge of edges) {
+    if (!incoming.has(edge.to) || !outgoing.has(edge.from)) continue;
+    incoming.set(edge.to, incoming.get(edge.to) + 1);
+    outgoing.get(edge.from).push(edge.to);
+  }
+
+  const queue = nodes.filter((node) => incoming.get(node.id) === 0).sort((a, b) => a.x - b.x);
+  const visited = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    visited.add(current.id);
+    for (const target of outgoing.get(current.id) || []) {
+      levels.set(target, Math.max(levels.get(target) || 0, (levels.get(current.id) || 0) + 1));
+      incoming.set(target, incoming.get(target) - 1);
+      if (incoming.get(target) === 0) {
+        queue.push(nodes.find((node) => node.id === target));
+      }
+    }
+  }
+
+  for (const node of nodes.sort((a, b) => a.x - b.x)) {
+    if (!visited.has(node.id)) {
+      levels.set(node.id, Math.max(levels.get(node.id) || 0, 0));
+    }
+  }
+  return levels;
+}
+
+function maxLaneHeight(laneCounts) {
+  let maxCount = 1;
+  for (const count of laneCounts.values()) maxCount = Math.max(maxCount, count);
+  return 150 + (maxCount - 1) * 118;
+}
+
+function applyCanvasSize(layout) {
+  svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  svg.style.width = `${layout.width}px`;
+  svg.style.height = `${layout.height}px`;
+  svg.dataset.exportWidth = String(layout.width);
+  svg.dataset.exportHeight = String(layout.height);
 }

@@ -117,7 +117,9 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         email: session.email,
         openaiModel: settings.openaiModel || defaultModel,
-        hasOpenAIKey: Boolean(settings.openaiApiKey)
+        hasOpenAIKey: Boolean(settings.openaiApiKey),
+        openaiKeyHint: settings.openaiKeyHint || "",
+        openaiKeyValidatedAt: settings.openaiKeyValidatedAt || null
       });
     }
 
@@ -130,17 +132,26 @@ const server = http.createServer(async (req, res) => {
 
       settings.openaiModel = String(body.openaiModel || defaultModel).trim() || defaultModel;
       if (typeof body.openaiApiKey === "string" && body.openaiApiKey.trim()) {
-        settings.openaiApiKey = encrypt(body.openaiApiKey.trim());
+        const cleanKey = body.openaiApiKey.trim();
+        await validateOpenAICredentials(cleanKey, settings.openaiModel);
+        settings.openaiApiKey = encrypt(cleanKey);
+        settings.openaiKeyHint = keyHint(cleanKey);
+        settings.openaiKeyValidatedAt = new Date().toISOString();
       }
       if (body.clearOpenAIKey) {
         delete settings.openaiApiKey;
+        delete settings.openaiKeyHint;
+        delete settings.openaiKeyValidatedAt;
       }
 
       await writeDb(db);
       return sendJson(res, 200, {
         ok: true,
         openaiModel: settings.openaiModel,
-        hasOpenAIKey: Boolean(settings.openaiApiKey)
+        hasOpenAIKey: Boolean(settings.openaiApiKey),
+        openaiKeyHint: settings.openaiKeyHint || "",
+        openaiKeyValidatedAt: settings.openaiKeyValidatedAt || null,
+        verified: Boolean(settings.openaiApiKey)
       });
     }
 
@@ -441,6 +452,30 @@ async function generateWithOpenAI({ prompt, refinement, currentDiagram, apiKey, 
     .find((content) => content.type === "output_text")?.text;
   if (!text) throw new Error("OpenAI response did not include JSON text.");
   return { ...JSON.parse(text), provider, model };
+}
+
+async function validateOpenAICredentials(apiKey, model) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      input: "Reply with OK",
+      max_output_tokens: 1
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI key validation failed: ${response.status} ${detail}`);
+  }
+}
+
+function keyHint(value) {
+  return value.length >= 4 ? value.slice(-4) : value;
 }
 
 function buildGenerationPrompt(prompt, refinement, currentDiagram) {
